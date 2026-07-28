@@ -1,0 +1,14 @@
+{
+  "name": "watchandftp",
+  "version": "1.0.0",
+  "description": "Watch folder for new/changed files and automatically upload to FTP server",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "basic-ftp": "^5.0.5",
+    "chokidar": "^3.6.0",
+    "dotenv": "^16.4.5"
+  }
+}
