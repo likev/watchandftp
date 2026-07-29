@@ -72,7 +72,7 @@ async function uploadToFtp(filePath) {
       // Upload with temporary .uploading extension then atomic rename
       const tempRemoteFilePath = `${remoteFilePath}.uploading`;
       console.log(`[${new Date().toLocaleTimeString()}] Uploading temporary: ${filename}.uploading`);
-      await client.uploadFile(filePath, tempRemoteFilePath);
+      await client.uploadFrom(filePath, tempRemoteFilePath);
 
       try {
         await client.rename(tempRemoteFilePath, remoteFilePath);
@@ -88,7 +88,7 @@ async function uploadToFtp(filePath) {
       console.log(`[${new Date().toLocaleTimeString()}] SUCCESS: Uploaded & Renamed ${filename} -> ${CONFIG.remoteDir}`);
     } else {
       // Direct upload
-      await client.uploadFile(filePath, remoteFilePath);
+      await client.uploadFrom(filePath, remoteFilePath);
       console.log(`[${new Date().toLocaleTimeString()}] SUCCESS: Uploaded ${filename} -> ${CONFIG.remoteDir}`);
     }
   } catch (err) {
