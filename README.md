@@ -33,6 +33,7 @@ cp .env.example .env
 | `FTP_PASSWORD` | `password` | FTP login password |
 | `FTP_REMOTE_DIR` | `/remote/target/dir` | Target directory on the FTP server |
 | `FTP_SECURE` | `false` | Set to `true` for FTPS (FTP over TLS/SSL) |
+| `FTP_TIMEOUT` | `30000` | Network socket timeout in milliseconds (default: `30000` ms / 30 seconds) |
 | `STABILITY_THRESHOLD` | `2000` | Time (ms) file size must remain unchanged before uploading |
 | `POLL_INTERVAL` | `100` | Polling frequency (ms) to check file size stability |
 | `MAX_AGE_DAYS` | `1` | Age threshold in days (e.g. `1` or `0.5` for 12 hours) for auto-deletion |

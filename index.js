@@ -18,6 +18,7 @@ const CONFIG = {
   ftpPassword: process.env.FTP_PASSWORD || 'password',
   remoteDir: process.env.FTP_REMOTE_DIR || '/remote/target/dir',
   secure: process.env.FTP_SECURE === 'true', // true for FTPS (FTP over TLS)
+  ftpTimeout: parseInt(process.env.FTP_TIMEOUT || '30000', 10), // Network timeout in ms (default: 30000ms / 30 seconds)
   stabilityThreshold: parseInt(process.env.STABILITY_THRESHOLD || '2000', 10), // ms to wait for file size stabilization
   pollInterval: parseInt(process.env.POLL_INTERVAL || '100', 10),
 
@@ -33,6 +34,7 @@ console.log(`Watch & Auto-Upload:  ${CONFIG.enableWatchUpload ? 'ENABLED' : 'DIS
 console.log(`Atomic (.uploading):  ${CONFIG.useAtomicUpload ? 'ENABLED' : 'DISABLED'}`);
 console.log(`Local Watch Directory: ${CONFIG.watchDir}`);
 console.log(`FTP Server:           ${CONFIG.ftpHost}:${CONFIG.ftpPort}`);
+console.log(`FTP Timeout:          ${CONFIG.ftpTimeout}ms (${CONFIG.ftpTimeout / 1000}s)`);
 console.log(`Remote Target Dir:    ${CONFIG.remoteDir}`);
 if (CONFIG.enableWatchUpload) {
   console.log(`Stability Threshold:  ${CONFIG.stabilityThreshold}ms`);
@@ -53,6 +55,7 @@ async function uploadToFtp(filePath) {
 
   const client = new ftp.Client();
   client.ftp.verbose = false; // Set to true for detailed raw FTP command logging
+  client.ftp.timeout = CONFIG.ftpTimeout; // Network timeout in ms
 
   try {
     await client.access({
@@ -130,6 +133,7 @@ async function cleanupLocalFiles() {
 async function cleanupRemoteFiles() {
   const client = new ftp.Client();
   client.ftp.verbose = false;
+  client.ftp.timeout = CONFIG.ftpTimeout;
   const cutoffTime = Date.now() - CONFIG.maxAgeDays * 24 * 60 * 60 * 1000;
 
   try {
