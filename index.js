@@ -9,6 +9,7 @@ const CONFIG = {
   // Feature Toggles
   enableWatchUpload: process.env.ENABLE_WATCH_UPLOAD !== 'false', // Default: true
   useAtomicUpload: process.env.USE_ATOMIC_UPLOAD === 'true',     // Default: false (upload with .uploading extension then rename)
+  persistentConnection: process.env.PERSISTENT_CONNECTION === 'true', // Default: false (reuse connection with auto-reconnect)
 
   // Path & FTP Configuration
   watchDir: process.env.WATCH_DIR || 'C:/path/to/local/dir',
@@ -31,6 +32,7 @@ const CONFIG = {
 
 console.log('--- Watch & FTP Auto-Uploader / Cleanup Service ---');
 console.log(`Watch & Auto-Upload:  ${CONFIG.enableWatchUpload ? 'ENABLED' : 'DISABLED'}`);
+console.log(`Persistent Connection:${CONFIG.persistentConnection ? 'ENABLED (Auto-Reconnect)' : 'DISABLED (Per-File Login)'}`);
 console.log(`Atomic (.uploading):  ${CONFIG.useAtomicUpload ? 'ENABLED' : 'DISABLED'}`);
 console.log(`Local Watch Directory: ${CONFIG.watchDir}`);
 console.log(`FTP Server:           ${CONFIG.ftpHost}:${CONFIG.ftpPort}`);
@@ -47,24 +49,72 @@ if (CONFIG.autoDeleteLocal || CONFIG.autoDeleteRemote) {
 console.log('---------------------------------------------------\n');
 
 /**
+ * Connection Manager for handling reusable persistent connections with auto-reconnect
+ */
+class FtpConnectionManager {
+  constructor(config) {
+    this.config = config;
+    this.client = null;
+  }
+
+  async getClient() {
+    // Mode 1: Per-File Stateless Connection (persistentConnection = false)
+    if (!this.config.persistentConnection) {
+      const newClient = new ftp.Client();
+      newClient.ftp.verbose = false;
+      newClient.ftp.timeout = this.config.ftpTimeout;
+      await newClient.access({
+        host: this.config.ftpHost,
+        port: this.config.ftpPort,
+        user: this.config.ftpUser,
+        password: this.config.ftpPassword,
+        secure: this.config.secure,
+      });
+      return { client: newClient, isShared: false };
+    }
+
+    // Mode 2: Reusable Persistent Connection (persistentConnection = true)
+    if (this.client && !this.client.closed) {
+      try {
+        // Send a lightweight NOOP command to verify if session is still alive
+        await this.client.send('NOOP', true);
+        return { client: this.client, isShared: true };
+      } catch (err) {
+        console.log(`[${new Date().toLocaleTimeString()}] Session expired/closed by server. Re-authenticating...`);
+        this.client.close();
+        this.client = null;
+      }
+    }
+
+    // Connect fresh persistent client
+    console.log(`[${new Date().toLocaleTimeString()}] Authenticating persistent FTP connection...`);
+    this.client = new ftp.Client();
+    this.client.ftp.verbose = false;
+    this.client.ftp.timeout = this.config.ftpTimeout;
+    await this.client.access({
+      host: this.config.ftpHost,
+      port: this.config.ftpPort,
+      user: this.config.ftpUser,
+      password: this.config.ftpPassword,
+      secure: this.config.secure,
+    });
+    return { client: this.client, isShared: true };
+  }
+}
+
+const ftpManager = new FtpConnectionManager(CONFIG);
+
+/**
  * Uploads a single file to the FTP server using basic-ftp
  */
 async function uploadToFtp(filePath) {
   const filename = path.basename(filePath);
   console.log(`[${new Date().toLocaleTimeString()}] File ready for upload: ${filename}`);
 
-  const client = new ftp.Client();
-  client.ftp.verbose = false; // Set to true for detailed raw FTP command logging
-  client.ftp.timeout = CONFIG.ftpTimeout; // Network timeout in ms
-
+  let clientInfo;
   try {
-    await client.access({
-      host: CONFIG.ftpHost,
-      port: CONFIG.ftpPort,
-      user: CONFIG.ftpUser,
-      password: CONFIG.ftpPassword,
-      secure: CONFIG.secure,
-    });
+    clientInfo = await ftpManager.getClient();
+    const client = clientInfo.client;
 
     // Ensure target remote directory exists and navigate into it
     await client.ensureDir(CONFIG.remoteDir);
@@ -97,7 +147,10 @@ async function uploadToFtp(filePath) {
   } catch (err) {
     console.error(`[${new Date().toLocaleTimeString()}] ERROR: Failed to upload ${filename}:`, err.message);
   } finally {
-    client.close();
+    // If persistent mode is disabled, close connection immediately
+    if (clientInfo && !clientInfo.isShared && clientInfo.client) {
+      clientInfo.client.close();
+    }
   }
 }
 

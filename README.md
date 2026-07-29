@@ -3,8 +3,9 @@
 Monitors a local folder for newly created or modified files, waits until file writing is 100% finished, automatically uploads them to an FTP server, and optionally cleans up old files on local disk and/or the FTP server.
 
 ## Features
+- **Persistent Connection & Auto-Reconnect**: Optional reusable connection mode with automatic session recovery if server idle timeout occurs.
 - **Atomic Temporary Uploads**: Option to upload files as `.uploading` and atomically rename them upon completion to prevent remote processes from reading partial uploads.
-- **Modular Feature Toggles**: Independently enable/disable file watching/uploading, atomic uploads, and auto-deletion cleanup.
+- **Modular Feature Toggles**: Independently enable/disable file watching/uploading, persistent connections, atomic uploads, and auto-deletion cleanup.
 - **Cross-Platform**: Runs natively on **Windows 10**, **Linux**, **WSL**, and **macOS**.
 - **Write Completion Handling**: Uses `chokidar`'s `awaitWriteFinish` to ensure files (from slow writes, big transfers, or WSL) are not uploaded while still 0 bytes or locked.
 - **Auto-Delete Old Files**: Configurable automatic deletion of files older than $X$ days on local disk and/or FTP server.
@@ -25,6 +26,7 @@ cp .env.example .env
 | Setting | Default | Description |
 | :--- | :--- | :--- |
 | `ENABLE_WATCH_UPLOAD` | `true` | Set to `false` to disable file watching and uploading (standalone cleanup mode) |
+| `PERSISTENT_CONNECTION` | `false` | Set to `true` to reuse FTP connection session across uploads with auto-reconnect on idle timeout |
 | `USE_ATOMIC_UPLOAD` | `false` | Set to `true` to upload files as `filename.uploading` and atomically rename to `filename` when done |
 | `WATCH_DIR` | `C:/path/to/local/dir` | Local folder to monitor for changes |
 | `FTP_HOST` | `ftp.example.com` | FTP server hostname or IP address |
@@ -43,14 +45,25 @@ cp .env.example .env
 
 ---
 
+## Connection Modes (`PERSISTENT_CONNECTION`)
+
+* **`PERSISTENT_CONNECTION=false` (Default - Per-File Login)**:
+  * Opens a fresh FTP connection for each upload and closes it immediately.
+  * Completely immune to server session idle timeouts. Best for low-frequency file additions.
+* **`PERSISTENT_CONNECTION=true` (Persistent Connection Mode)**:
+  * Reuses an active open connection across multiple file uploads (0ms login overhead for subsequent files).
+  * Automatically checks session health (`NOOP`). If the server closed the session due to idle timeout, it re-authenticates automatically before performing the upload.
+
+---
+
 ## How `FTP_TIMEOUT` Works
 
 `FTP_TIMEOUT` sets a **Network Socket Idle / Inactivity Timeout** (default: 30,000ms / 30 seconds):
 
 * **Connect / Command Timeout**: Controls how long the script waits for the FTP server to respond during initial connection (`access`), login (`USER`/`PASS`), or command execution.
 * **Transfer Inactivity Timeout**: During active file uploads, it monitors socket idle time.
-  * **Large files will NOT time out** as long as network data is actively flowing. A 10GB file can take hours to upload without error.
-  * If the network freezes or drops mid-upload and **0 bytes move for 30 consecutive seconds**, it triggers a timeout error and closes the connection cleanly.
+  * **Large files will NOT time out** as long as network data is actively flowing.
+  * If the network freezes or drops mid-upload and **0 bytes move for 30 consecutive seconds**, it triggers a timeout error.
 
 ---
 
