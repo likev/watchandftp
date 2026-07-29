@@ -33,13 +33,24 @@ cp .env.example .env
 | `FTP_PASSWORD` | `password` | FTP login password |
 | `FTP_REMOTE_DIR` | `/remote/target/dir` | Target directory on the FTP server |
 | `FTP_SECURE` | `false` | Set to `true` for FTPS (FTP over TLS/SSL) |
-| `FTP_TIMEOUT` | `30000` | Network socket timeout in milliseconds (default: `30000` ms / 30 seconds) |
+| `FTP_TIMEOUT` | `30000` | Network socket inactivity timeout in milliseconds (default: `30000` ms / 30 seconds) |
 | `STABILITY_THRESHOLD` | `2000` | Time (ms) file size must remain unchanged before uploading |
 | `POLL_INTERVAL` | `100` | Polling frequency (ms) to check file size stability |
 | `MAX_AGE_DAYS` | `1` | Age threshold in days (e.g. `1` or `0.5` for 12 hours) for auto-deletion |
 | `AUTO_DELETE_LOCAL` | `false` | Set to `true` to automatically delete local files older than `MAX_AGE_DAYS` |
 | `AUTO_DELETE_REMOTE` | `false` | Set to `true` to automatically delete FTP remote files older than `MAX_AGE_DAYS` |
 | `CLEANUP_INTERVAL_MINUTES` | `60` | Frequency in minutes to run the cleanup job |
+
+---
+
+## How `FTP_TIMEOUT` Works
+
+`FTP_TIMEOUT` sets a **Network Socket Idle / Inactivity Timeout** (default: 30,000ms / 30 seconds):
+
+* **Connect / Command Timeout**: Controls how long the script waits for the FTP server to respond during initial connection (`access`), login (`USER`/`PASS`), or command execution.
+* **Transfer Inactivity Timeout**: During active file uploads, it monitors socket idle time.
+  * **Large files will NOT time out** as long as network data is actively flowing. A 10GB file can take hours to upload without error.
+  * If the network freezes or drops mid-upload and **0 bytes move for 30 consecutive seconds**, it triggers a timeout error and closes the connection cleanly.
 
 ---
 
