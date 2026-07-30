@@ -27,6 +27,7 @@ const CONFIG = {
   maxAgeDays: parseFloat(process.env.MAX_AGE_DAYS || '1'),
   autoDeleteLocal: process.env.AUTO_DELETE_LOCAL === 'true',
   autoDeleteRemote: process.env.AUTO_DELETE_REMOTE === 'true',
+  autoDeleteRecursive: process.env.AUTO_DELETE_RECURSIVE === 'true', // Default: false (clean files in subdirectories recursively)
   cleanupIntervalMinutes: parseInt(process.env.CLEANUP_INTERVAL_MINUTES || '60', 10),
 };
 
@@ -44,6 +45,7 @@ if (CONFIG.enableWatchUpload) {
 console.log(`Auto Delete Local:    ${CONFIG.autoDeleteLocal} (> ${CONFIG.maxAgeDays} days)`);
 console.log(`Auto Delete Remote:   ${CONFIG.autoDeleteRemote} (> ${CONFIG.maxAgeDays} days)`);
 if (CONFIG.autoDeleteLocal || CONFIG.autoDeleteRemote) {
+  console.log(`Recursive Cleanup:    ${CONFIG.autoDeleteRecursive ? 'ENABLED (Includes Subdirectories)' : 'DISABLED (Top-level only)'}`);
   console.log(`Cleanup Interval:     Every ${CONFIG.cleanupIntervalMinutes} mins`);
 }
 console.log('---------------------------------------------------\n');
@@ -80,7 +82,7 @@ class FtpConnectionManager {
         await this.client.send('NOOP', true);
         return { client: this.client, isShared: true };
       } catch (err) {
-        console.log(`[${new Date().toLocaleTimeString()}] Session expired/closed by server. Re-authenticating...`);
+        console.log(`[${new Date().toLocaleTimeString()}] Notice: Idle session expired/closed by server. Re-authenticating...`);
         this.client.close();
         this.client = null;
       }
@@ -155,28 +157,65 @@ async function uploadToFtp(filePath) {
 }
 
 /**
- * Deletes local files in watchDir older than CONFIG.maxAgeDays
+ * Recursively scans and deletes local files in dirPath older than cutoffTime
  */
-async function cleanupLocalFiles() {
-  if (!fs.existsSync(CONFIG.watchDir)) return;
-  const cutoffTime = Date.now() - CONFIG.maxAgeDays * 24 * 60 * 60 * 1000;
+async function cleanupLocalDirectory(dirPath, cutoffTime, recursive) {
+  if (!fs.existsSync(dirPath)) return;
 
   try {
-    const files = await fs.promises.readdir(CONFIG.watchDir);
-    for (const file of files) {
-      const fullPath = path.join(CONFIG.watchDir, file);
+    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dirPath, entry.name);
       try {
-        const stats = await fs.promises.stat(fullPath);
-        if (stats.isFile() && stats.mtimeMs < cutoffTime) {
-          await fs.promises.unlink(fullPath);
-          console.log(`[${new Date().toLocaleTimeString()}] CLEANUP (Local): Deleted old file ${file} (age > ${CONFIG.maxAgeDays} days)`);
+        if (entry.isFile()) {
+          const stats = await fs.promises.stat(fullPath);
+          if (stats.mtimeMs < cutoffTime) {
+            await fs.promises.unlink(fullPath);
+            const relPath = path.relative(CONFIG.watchDir, fullPath);
+            console.log(`[${new Date().toLocaleTimeString()}] CLEANUP (Local): Deleted old file ${relPath} (age > ${CONFIG.maxAgeDays} days)`);
+          }
+        } else if (entry.isDirectory() && recursive) {
+          await cleanupLocalDirectory(fullPath, cutoffTime, recursive);
         }
       } catch (err) {
-        console.error(`[${new Date().toLocaleTimeString()}] CLEANUP (Local Error): ${file}:`, err.message);
+        console.error(`[${new Date().toLocaleTimeString()}] CLEANUP (Local Error) ${entry.name}:`, err.message);
       }
     }
   } catch (err) {
-    console.error(`[${new Date().toLocaleTimeString()}] CLEANUP (Local Dir Error):`, err.message);
+    console.error(`[${new Date().toLocaleTimeString()}] CLEANUP (Local Dir Error) ${dirPath}:`, err.message);
+  }
+}
+
+/**
+ * Deletes local files in watchDir older than CONFIG.maxAgeDays
+ */
+async function cleanupLocalFiles() {
+  const cutoffTime = Date.now() - CONFIG.maxAgeDays * 24 * 60 * 60 * 1000;
+  await cleanupLocalDirectory(CONFIG.watchDir, cutoffTime, CONFIG.autoDeleteRecursive);
+}
+
+/**
+ * Recursively scans and deletes remote files on FTP server older than cutoffTime
+ */
+async function cleanupRemoteDirectory(client, currentRemoteDir, cutoffTime, recursive) {
+  try {
+    const list = await client.list(currentRemoteDir);
+    for (const item of list) {
+      if (item.name === '.' || item.name === '..') continue;
+      const remoteFilePath = path.join(currentRemoteDir, item.name).replace(/\\/g, '/');
+
+      if (item.isFile && item.modifiedAt) {
+        const itemModifiedTime = new Date(item.modifiedAt).getTime();
+        if (itemModifiedTime < cutoffTime) {
+          await client.remove(remoteFilePath);
+          console.log(`[${new Date().toLocaleTimeString()}] CLEANUP (Remote): Deleted old FTP file ${remoteFilePath} (age > ${CONFIG.maxAgeDays} days)`);
+        }
+      } else if (item.isDirectory && recursive) {
+        await cleanupRemoteDirectory(client, remoteFilePath, cutoffTime, recursive);
+      }
+    }
+  } catch (err) {
+    console.error(`[${new Date().toLocaleTimeString()}] CLEANUP (Remote Dir Error) ${currentRemoteDir}:`, err.message);
   }
 }
 
@@ -199,19 +238,7 @@ async function cleanupRemoteFiles() {
     });
 
     await client.ensureDir(CONFIG.remoteDir);
-    const list = await client.list();
-
-    for (const item of list) {
-      // Check if it's a file and older than maxAgeDays
-      if (item.isFile && item.modifiedAt) {
-        const itemModifiedTime = new Date(item.modifiedAt).getTime();
-        if (itemModifiedTime < cutoffTime) {
-          const remoteFilePath = path.join(CONFIG.remoteDir, item.name).replace(/\\/g, '/');
-          await client.remove(remoteFilePath);
-          console.log(`[${new Date().toLocaleTimeString()}] CLEANUP (Remote): Deleted old FTP file ${item.name} (age > ${CONFIG.maxAgeDays} days)`);
-        }
-      }
-    }
+    await cleanupRemoteDirectory(client, CONFIG.remoteDir, cutoffTime, CONFIG.autoDeleteRecursive);
   } catch (err) {
     console.error(`[${new Date().toLocaleTimeString()}] CLEANUP (Remote Error):`, err.message);
   } finally {

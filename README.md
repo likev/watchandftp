@@ -3,6 +3,7 @@
 Monitors a local folder for newly created or modified files, waits until file writing is 100% finished, automatically uploads them to an FTP server, and optionally cleans up old files on local disk and/or the FTP server.
 
 ## Features
+- **Recursive Cleanup Option**: Option to clean files in subdirectories recursively (`AUTO_DELETE_RECURSIVE`).
 - **Persistent Connection & Auto-Reconnect**: Optional reusable connection mode with automatic session recovery if server idle timeout occurs.
 - **Atomic Temporary Uploads**: Option to upload files as `.uploading` and atomically rename them upon completion to prevent remote processes from reading partial uploads.
 - **Modular Feature Toggles**: Independently enable/disable file watching/uploading, persistent connections, atomic uploads, and auto-deletion cleanup.
@@ -41,6 +42,7 @@ cp .env.example .env
 | `MAX_AGE_DAYS` | `1` | Age threshold in days (e.g. `1` or `0.5` for 12 hours) for auto-deletion |
 | `AUTO_DELETE_LOCAL` | `false` | Set to `true` to automatically delete local files older than `MAX_AGE_DAYS` |
 | `AUTO_DELETE_REMOTE` | `false` | Set to `true` to automatically delete FTP remote files older than `MAX_AGE_DAYS` |
+| `AUTO_DELETE_RECURSIVE` | `false` | Set to `true` to scan and clean files in subdirectories recursively |
 | `CLEANUP_INTERVAL_MINUTES` | `60` | Frequency in minutes to run the cleanup job |
 
 ---
