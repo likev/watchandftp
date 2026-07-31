@@ -10,6 +10,7 @@ const CONFIG = {
   enableWatchUpload: process.env.ENABLE_WATCH_UPLOAD !== 'false', // Default: true
   useAtomicUpload: process.env.USE_ATOMIC_UPLOAD === 'true',     // Default: false (upload with .uploading extension then rename)
   persistentConnection: process.env.PERSISTENT_CONNECTION === 'true', // Default: false (reuse connection with auto-reconnect)
+  includeHiddenFiles: process.env.INCLUDE_HIDDEN_FILES === 'true',   // Default: false (exclude files starting with '.')
 
   // Path & FTP Configuration
   watchDir: process.env.WATCH_DIR || 'C:/path/to/local/dir',
@@ -35,6 +36,7 @@ console.log('--- Watch & FTP Auto-Uploader / Cleanup Service ---');
 console.log(`Watch & Auto-Upload:  ${CONFIG.enableWatchUpload ? 'ENABLED' : 'DISABLED'}`);
 console.log(`Persistent Connection:${CONFIG.persistentConnection ? 'ENABLED (Auto-Reconnect)' : 'DISABLED (Per-File Login)'}`);
 console.log(`Atomic (.uploading):  ${CONFIG.useAtomicUpload ? 'ENABLED' : 'DISABLED'}`);
+console.log(`Include Hidden Files: ${CONFIG.includeHiddenFiles ? 'ENABLED (Include dotfiles)' : 'DISABLED (Exclude dotfiles)'}`);
 console.log(`Local Watch Directory: ${CONFIG.watchDir}`);
 console.log(`FTP Server:           ${CONFIG.ftpHost}:${CONFIG.ftpPort}`);
 console.log(`FTP Timeout:          ${CONFIG.ftpTimeout}ms (${CONFIG.ftpTimeout / 1000}s)`);
@@ -111,6 +113,12 @@ const ftpManager = new FtpConnectionManager(CONFIG);
  */
 async function uploadToFtp(filePath) {
   const filename = path.basename(filePath);
+
+  // Skip hidden files if INCLUDE_HIDDEN_FILES=false
+  if (!CONFIG.includeHiddenFiles && filename.startsWith('.')) {
+    return;
+  }
+
   console.log(`[${new Date().toLocaleTimeString()}] File ready for upload: ${filename}`);
 
   let clientInfo;
@@ -165,6 +173,9 @@ async function cleanupLocalDirectory(dirPath, cutoffTime, recursive) {
   try {
     const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
     for (const entry of entries) {
+      if (!CONFIG.includeHiddenFiles && entry.name.startsWith('.')) {
+        continue;
+      }
       const fullPath = path.join(dirPath, entry.name);
       try {
         if (entry.isFile()) {
@@ -202,6 +213,8 @@ async function cleanupRemoteDirectory(client, currentRemoteDir, cutoffTime, recu
     const list = await client.list(currentRemoteDir);
     for (const item of list) {
       if (item.name === '.' || item.name === '..') continue;
+      if (!CONFIG.includeHiddenFiles && item.name.startsWith('.')) continue;
+
       const remoteFilePath = path.join(currentRemoteDir, item.name).replace(/\\/g, '/');
 
       if (item.isFile && item.modifiedAt) {
@@ -266,14 +279,24 @@ async function runCleanupJob() {
 
 // 1. Initialize File Watcher & Auto-Upload if enabled
 if (CONFIG.enableWatchUpload) {
-  const watcher = chokidar.watch(CONFIG.watchDir, {
+  const watcherOptions = {
     persistent: true,
     ignoreInitial: true, // Ignore existing files on initial startup
     awaitWriteFinish: {
       stabilityThreshold: CONFIG.stabilityThreshold,
       pollInterval: CONFIG.pollInterval,
     },
-  });
+  };
+
+  // Exclude hidden files starting with '.' if INCLUDE_HIDDEN_FILES is false
+  if (!CONFIG.includeHiddenFiles) {
+    watcherOptions.ignored = (pathStr) => {
+      const basename = path.basename(pathStr);
+      return basename.startsWith('.') && basename !== '.';
+    };
+  }
+
+  const watcher = chokidar.watch(CONFIG.watchDir, watcherOptions);
 
   watcher.on('add', (filePath) => uploadToFtp(filePath));
   watcher.on('change', (filePath) => uploadToFtp(filePath));

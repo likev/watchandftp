@@ -3,6 +3,7 @@
 Monitors a local folder for newly created or modified files, waits until file writing is 100% finished, automatically uploads them to an FTP server, and optionally cleans up old files on local disk and/or the FTP server.
 
 ## Features
+- **Exclude Hidden Files**: Default filtering out of dotfiles (`.DS_Store`, `.env`, `.git`, etc.) with configurable toggle (`INCLUDE_HIDDEN_FILES`).
 - **Recursive Cleanup Option**: Option to clean files in subdirectories recursively (`AUTO_DELETE_RECURSIVE`).
 - **Persistent Connection & Auto-Reconnect**: Optional reusable connection mode with automatic session recovery if server idle timeout occurs.
 - **Atomic Temporary Uploads**: Option to upload files as `.uploading` and atomically rename them upon completion to prevent remote processes from reading partial uploads.
@@ -29,6 +30,7 @@ cp .env.example .env
 | `ENABLE_WATCH_UPLOAD` | `true` | Set to `false` to disable file watching and uploading (standalone cleanup mode) |
 | `PERSISTENT_CONNECTION` | `false` | Set to `true` to reuse FTP connection session across uploads with auto-reconnect on idle timeout |
 | `USE_ATOMIC_UPLOAD` | `false` | Set to `true` to upload files as `filename.uploading` and atomically rename to `filename` when done |
+| `INCLUDE_HIDDEN_FILES` | `false` | Set to `true` to include hidden dotfiles (`.DS_Store`, `.git`, etc.) in watch/upload and cleanup |
 | `WATCH_DIR` | `C:/path/to/local/dir` | Local folder to monitor for changes |
 | `FTP_HOST` | `ftp.example.com` | FTP server hostname or IP address |
 | `FTP_PORT` | `21` | FTP port (default: 21) |
@@ -44,6 +46,16 @@ cp .env.example .env
 | `AUTO_DELETE_REMOTE` | `false` | Set to `true` to automatically delete FTP remote files older than `MAX_AGE_DAYS` |
 | `AUTO_DELETE_RECURSIVE` | `false` | Set to `true` to scan and clean files in subdirectories recursively |
 | `CLEANUP_INTERVAL_MINUTES` | `60` | Frequency in minutes to run the cleanup job |
+
+---
+
+## Hidden Files (`INCLUDE_HIDDEN_FILES`)
+
+* **`INCLUDE_HIDDEN_FILES=false` (Default)**:
+  * Automatically ignores files and directories starting with a dot `.` (such as `.DS_Store`, `.git`, `.env`, `.tmp_file`).
+  * Hidden files are **neither uploaded nor deleted during cleanup**.
+* **`INCLUDE_HIDDEN_FILES=true`**:
+  * Includes all files starting with a dot `.` in watch/upload and cleanup scanning.
 
 ---
 
