@@ -3,6 +3,7 @@
 Monitors local folders for newly created or modified files, waits until file writing is 100% finished, automatically uploads them to FTP servers, and optionally cleans up old files on local disk and/or FTP servers.
 
 ## Features
+- **Exponential Backoff Retries**: Option to retry failed uploads automatically with doubling backoff delays (1 min, 2 min, 4 min...).
 - **Multi-Task & Multi-FTP Support**: Define multiple `watchDir` $\rightarrow$ `FTP` pairs in `config.yaml`.
 - **Global Defaults & Task Inheritance**: Define `default:` options once in `config.yaml` and override per-task as needed.
 - **Exclude Hidden Files**: Default filtering out of dotfiles (`.DS_Store`, `.git`, etc.) with configurable toggle (`includeHiddenFiles`).
@@ -30,6 +31,8 @@ default:
   persistentConnection: false
   useAtomicUpload: true
   includeHiddenFiles: false
+  retryIfFail: false
+  retryTimes: 3
   ftpPort: 21
   ftpSecure: false
   ftpTimeout: 30000
@@ -51,13 +54,15 @@ tasks:
     ftpPassword: "passwordA"
     ftpRemoteDir: "/public_html/images"
 
-  - name: "Task 2 - Data Sync"
+  - name: "Task 2 - Data Sync with Retries"
     watchDir: "C:/path/to/backups"
     ftpHost: "ftp.siteb.com"
     ftpPort: 2121
     ftpUser: "userB"
     ftpPassword: "passwordB"
     ftpRemoteDir: "/backups/daily"
+    retryIfFail: true
+    retryTimes: 3
     useAtomicUpload: true
     autoDeleteRemote: true
     maxAgeDays: 7
@@ -72,6 +77,8 @@ tasks:
 | `persistentConnection` | `false` | Set to `true` to reuse FTP connection session across uploads with auto-reconnect |
 | `useAtomicUpload` | `false` | Set to `true` to upload files as `filename.uploading` and atomically rename when done |
 | `includeHiddenFiles` | `false` | Set to `true` to include hidden dotfiles (`.DS_Store`, `.git`, etc.) |
+| `retryIfFail` | `false` | Set to `true` to automatically retry failed file uploads |
+| `retryTimes` | `3` | Maximum number of retry attempts if `retryIfFail=true` |
 | `watchDir` | — | Local directory to monitor for changes |
 | `ftpHost` | — | FTP server hostname or IP address |
 | `ftpPort` | `21` | FTP port |
@@ -87,6 +94,17 @@ tasks:
 | `autoDeleteRemote` | `false` | Set to `true` to automatically delete FTP remote files older than `maxAgeDays` |
 | `autoDeleteRecursive` | `false` | Set to `true` to scan and clean files in subdirectories recursively |
 | `cleanupIntervalMinutes` | `60` | Frequency in minutes to run the cleanup job |
+
+---
+
+## Upload Failure Retries (`retryIfFail` & `retryTimes`)
+
+When `retryIfFail: true` is set, if an upload fails due to network disconnects or temporary FTP server errors, the script retries using **Exponential Backoff**:
+
+* **Attempt 1 fails** $\rightarrow$ Waits **1 minute** before Retry 1
+* **Attempt 2 fails** $\rightarrow$ Waits **2 minutes** before Retry 2
+* **Attempt 3 fails** $\rightarrow$ Waits **4 minutes** before Retry 3
+* *(formula: $2^{(attempt-1)}$ minutes)*
 
 ---
 

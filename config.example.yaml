@@ -5,6 +5,8 @@ default:
   persistentConnection: false
   useAtomicUpload: true
   includeHiddenFiles: false
+  retryIfFail: false
+  retryTimes: 3
   ftpPort: 21
   ftpSecure: false
   ftpTimeout: 30000
@@ -27,7 +29,7 @@ tasks:
     ftpPassword: "password"
     ftpRemoteDir: "/remote/target/dir1"
 
-  - name: "Task 2 - Data Sync"
+  - name: "Task 2 - Data Sync with Retries"
     watchDir: "C:/path/to/local/dir2"
     ftpHost: "ftp.rxdwdsj.com"
     ftpPort: 2121
@@ -35,5 +37,7 @@ tasks:
     ftpPassword: "1qaz2wsx"
     ftpRemoteDir: "/test_upload"
     useAtomicUpload: true
+    retryIfFail: true
+    retryTimes: 3
     autoDeleteRemote: true
     maxAgeDays: 7

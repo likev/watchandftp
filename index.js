@@ -35,6 +35,8 @@ function loadConfiguration() {
         useAtomicUpload: merged.useAtomicUpload === true,
         persistentConnection: merged.persistentConnection === true,
         includeHiddenFiles: merged.includeHiddenFiles === true,
+        retryIfFail: merged.retryIfFail === true,
+        retryTimes: parseInt(merged.retryTimes || '3', 10),
         watchDir: merged.watchDir || 'C:/path/to/local/dir',
         ftpHost: merged.ftpHost || 'ftp.example.com',
         ftpPort: parseInt(merged.ftpPort || '21', 10),
@@ -138,40 +140,58 @@ class TaskRunner {
 
     this.log(`File ready for upload: ${filename}`);
 
-    let clientInfo;
-    try {
-      clientInfo = await this.ftpManager.getClient();
-      const client = clientInfo.client;
+    const maxAttempts = this.config.retryIfFail ? (this.config.retryTimes + 1) : 1;
 
-      await client.ensureDir(this.config.ftpRemoteDir);
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      let clientInfo;
+      try {
+        clientInfo = await this.ftpManager.getClient();
+        const client = clientInfo.client;
 
-      const remoteFilePath = path.join(this.config.ftpRemoteDir, filename).replace(/\\/g, '/');
+        await client.ensureDir(this.config.ftpRemoteDir);
 
-      if (this.config.useAtomicUpload) {
-        const tempRemoteFilePath = `${remoteFilePath}.uploading`;
-        this.log(`Uploading temporary: ${filename}.uploading`);
-        await client.uploadFrom(filePath, tempRemoteFilePath);
+        const remoteFilePath = path.join(this.config.ftpRemoteDir, filename).replace(/\\/g, '/');
 
-        try {
-          await client.rename(tempRemoteFilePath, remoteFilePath);
-        } catch (renameErr) {
+        if (this.config.useAtomicUpload) {
+          const tempRemoteFilePath = `${remoteFilePath}.uploading`;
+          const attemptLabel = maxAttempts > 1 ? ` (attempt ${attempt}/${maxAttempts})` : '';
+          this.log(`Uploading temporary${attemptLabel}: ${filename}.uploading`);
+          await client.uploadFrom(filePath, tempRemoteFilePath);
+
           try {
-            await client.remove(remoteFilePath);
             await client.rename(tempRemoteFilePath, remoteFilePath);
-          } catch (retryErr) {
-            throw renameErr;
+          } catch (renameErr) {
+            try {
+              await client.remove(remoteFilePath);
+              await client.rename(tempRemoteFilePath, remoteFilePath);
+            } catch (retryErr) {
+              throw renameErr;
+            }
           }
+          this.log(`SUCCESS: Uploaded & Renamed ${filename} -> ${this.config.ftpRemoteDir}`);
+        } else {
+          const attemptLabel = maxAttempts > 1 ? ` (attempt ${attempt}/${maxAttempts})` : '';
+          this.log(`Uploading${attemptLabel}: ${filename}`);
+          await client.uploadFrom(filePath, remoteFilePath);
+          this.log(`SUCCESS: Uploaded ${filename} -> ${this.config.ftpRemoteDir}`);
         }
-        this.log(`SUCCESS: Uploaded & Renamed ${filename} -> ${this.config.ftpRemoteDir}`);
-      } else {
-        await client.uploadFrom(filePath, remoteFilePath);
-        this.log(`SUCCESS: Uploaded ${filename} -> ${this.config.ftpRemoteDir}`);
-      }
-    } catch (err) {
-      this.log(`ERROR: Failed to upload ${filename}: ${err.message}`, 'error');
-    } finally {
-      if (clientInfo && !clientInfo.isShared && clientInfo.client) {
-        clientInfo.client.close();
+
+        // Upload succeeded - exit retry loop
+        return;
+      } catch (err) {
+        this.log(`ERROR (attempt ${attempt}/${maxAttempts}): Failed to upload ${filename}: ${err.message}`, 'error');
+
+        if (attempt < maxAttempts) {
+          // Exponential backoff: 1 min, 2 min, 4 min, 8 min... (2^(attempt-1) minutes)
+          const waitMinutes = Math.pow(2, attempt - 1);
+          const waitMs = waitMinutes * 60 * 1000;
+          this.log(`Retrying upload in ${waitMinutes} minute(s)...`);
+          await new Promise((resolve) => setTimeout(resolve, waitMs));
+        }
+      } finally {
+        if (clientInfo && !clientInfo.isShared && clientInfo.client) {
+          clientInfo.client.close();
+        }
       }
     }
   }
@@ -268,6 +288,7 @@ class TaskRunner {
     console.log(`Persistent Conn:     ${this.config.persistentConnection ? 'ENABLED' : 'DISABLED'}`);
     console.log(`Atomic (.uploading): ${this.config.useAtomicUpload ? 'ENABLED' : 'DISABLED'}`);
     console.log(`Include Hidden Files:${this.config.includeHiddenFiles ? 'ENABLED' : 'DISABLED'}`);
+    console.log(`Retry On Failure:    ${this.config.retryIfFail ? `ENABLED (${this.config.retryTimes} retries, 1m/2m/4m...)` : 'DISABLED'}`);
     console.log(`Local Watch Dir:     ${this.config.watchDir}`);
     console.log(`FTP Server:          ${this.config.ftpHost}:${this.config.ftpPort}`);
     console.log(`Remote Target Dir:   ${this.config.ftpRemoteDir}`);
