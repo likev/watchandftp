@@ -157,17 +157,7 @@ class TaskRunner {
           const attemptLabel = maxAttempts > 1 ? ` (attempt ${attempt}/${maxAttempts})` : '';
           this.log(`Uploading temporary${attemptLabel}: ${filename}.uploading`);
           await client.uploadFrom(filePath, tempRemoteFilePath);
-
-          try {
-            await client.rename(tempRemoteFilePath, remoteFilePath);
-          } catch (renameErr) {
-            try {
-              await client.remove(remoteFilePath);
-              await client.rename(tempRemoteFilePath, remoteFilePath);
-            } catch (retryErr) {
-              throw renameErr;
-            }
-          }
+          await client.rename(tempRemoteFilePath, remoteFilePath);
           this.log(`SUCCESS: Uploaded & Renamed ${filename} -> ${this.config.ftpRemoteDir}`);
         } else {
           const attemptLabel = maxAttempts > 1 ? ` (attempt ${attempt}/${maxAttempts})` : '';
