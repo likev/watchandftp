@@ -9,7 +9,6 @@
   "dependencies": {
     "basic-ftp": "^5.0.5",
     "chokidar": "^3.6.0",
-    "dotenv": "^16.4.5",
     "js-yaml": "^5.2.2"
   }
 }

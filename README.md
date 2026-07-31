@@ -5,7 +5,7 @@ Monitors local folders for newly created or modified files, waits until file wri
 ## Features
 - **Multi-Task & Multi-FTP Support**: Define multiple `watchDir` $\rightarrow$ `FTP` pairs in `config.yaml`.
 - **Global Defaults & Task Inheritance**: Define `default:` options once in `config.yaml` and override per-task as needed.
-- **Exclude Hidden Files**: Default filtering out of dotfiles (`.DS_Store`, `.env`, `.git`, etc.) with configurable toggle (`includeHiddenFiles`).
+- **Exclude Hidden Files**: Default filtering out of dotfiles (`.DS_Store`, `.git`, etc.) with configurable toggle (`includeHiddenFiles`).
 - **Recursive Cleanup Option**: Option to clean files in subdirectories recursively (`autoDeleteRecursive`).
 - **Persistent Connection & Auto-Reconnect**: Optional reusable connection mode with automatic session recovery if server idle timeout occurs.
 - **Atomic Temporary Uploads**: Option to upload files as `.uploading` and atomically rename them upon completion to prevent remote processes from reading partial uploads.
@@ -44,20 +44,20 @@ default:
 # Multi dir-ftp pairs / tasks
 tasks:
   - name: "Task 1 - Web Assets"
-    watchDir: "C:/path/to/local/dir1"
-    ftpHost: "ftp.example.com"
+    watchDir: "C:/path/to/website/images"
+    ftpHost: "ftp.sitea.com"
     ftpPort: 21
-    ftpUser: "username"
-    ftpPassword: "password"
-    ftpRemoteDir: "/remote/target/dir1"
+    ftpUser: "userA"
+    ftpPassword: "passwordA"
+    ftpRemoteDir: "/public_html/images"
 
   - name: "Task 2 - Data Sync"
-    watchDir: "C:/path/to/local/dir2"
-    ftpHost: "ftp.rxdwdsj.com"
+    watchDir: "C:/path/to/backups"
+    ftpHost: "ftp.siteb.com"
     ftpPort: 2121
-    ftpUser: "ftpuser"
-    ftpPassword: "1qaz2wsx"
-    ftpRemoteDir: "/test_upload"
+    ftpUser: "userB"
+    ftpPassword: "passwordB"
+    ftpRemoteDir: "/backups/daily"
     useAtomicUpload: true
     autoDeleteRemote: true
     maxAgeDays: 7
@@ -87,8 +87,6 @@ tasks:
 | `autoDeleteRemote` | `false` | Set to `true` to automatically delete FTP remote files older than `maxAgeDays` |
 | `autoDeleteRecursive` | `false` | Set to `true` to scan and clean files in subdirectories recursively |
 | `cleanupIntervalMinutes` | `60` | Frequency in minutes to run the cleanup job |
-
-*(Note: Legacy `.env` files are still supported as a single-task fallback if no `config.yaml` is present).*
 
 ---
 

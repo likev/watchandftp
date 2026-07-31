@@ -3,82 +3,59 @@ const ftp = require('basic-ftp');
 const path = require('path');
 const fs = require('fs');
 const yaml = require('js-yaml');
-require('dotenv').config();
 
 /**
- * Loads configuration from YAML (config.yaml / config.yml) or falls back to .env
+ * Loads configuration from YAML (config.yaml / config.yml)
  */
 function loadConfiguration() {
   const configFile = process.env.CONFIG_FILE ||
     (fs.existsSync('config.yaml') ? 'config.yaml' :
     (fs.existsSync('config.yml') ? 'config.yml' : null));
 
-  if (configFile && fs.existsSync(configFile)) {
-    console.log(`[Config] Loading YAML configuration from ${configFile}...`);
-    try {
-      const raw = yaml.load(fs.readFileSync(configFile, 'utf8'));
-      const defaults = raw.default || {};
-      const rawTasks = Array.isArray(raw.tasks) && raw.tasks.length > 0 ? raw.tasks : [];
-
-      if (rawTasks.length === 0) {
-        console.warn(`[Config Warning] No tasks found in ${configFile}.`);
-      }
-
-      return rawTasks.map((t, index) => {
-        const merged = Object.assign({}, defaults, t);
-        return {
-          name: merged.name || `Task ${index + 1}`,
-          enableWatchUpload: merged.enableWatchUpload !== false,
-          useAtomicUpload: merged.useAtomicUpload === true,
-          persistentConnection: merged.persistentConnection === true,
-          includeHiddenFiles: merged.includeHiddenFiles === true,
-          watchDir: merged.watchDir || 'C:/path/to/local/dir',
-          ftpHost: merged.ftpHost || 'ftp.example.com',
-          ftpPort: parseInt(merged.ftpPort || '21', 10),
-          ftpUser: merged.ftpUser || 'username',
-          ftpPassword: String(merged.ftpPassword || 'password'),
-          ftpRemoteDir: merged.ftpRemoteDir || '/remote/target/dir',
-          secure: merged.ftpSecure === true,
-          ftpTimeout: parseInt(merged.ftpTimeout || '30000', 10),
-          stabilityThreshold: parseInt(merged.stabilityThreshold || '2000', 10),
-          pollInterval: parseInt(merged.pollInterval || '100', 10),
-          maxAgeDays: parseFloat(merged.maxAgeDays || '1'),
-          autoDeleteLocal: merged.autoDeleteLocal === true,
-          autoDeleteRemote: merged.autoDeleteRemote === true,
-          autoDeleteRecursive: merged.autoDeleteRecursive === true,
-          cleanupIntervalMinutes: parseInt(merged.cleanupIntervalMinutes || '60', 10),
-        };
-      });
-    } catch (err) {
-      console.error(`[Config Error] Failed to parse ${configFile}:`, err.message);
-      process.exit(1);
-    }
+  if (!configFile || !fs.existsSync(configFile)) {
+    console.error('[Config Error] Configuration file not found! Please create config.yaml (see config.example.yaml).');
+    process.exit(1);
   }
 
-  // Fallback to legacy single-task .env configuration
-  console.log('[Config] Loading single task from .env configuration...');
-  return [{
-    name: 'Default Task',
-    enableWatchUpload: process.env.ENABLE_WATCH_UPLOAD !== 'false',
-    useAtomicUpload: process.env.USE_ATOMIC_UPLOAD === 'true',
-    persistentConnection: process.env.PERSISTENT_CONNECTION === 'true',
-    includeHiddenFiles: process.env.INCLUDE_HIDDEN_FILES === 'true',
-    watchDir: process.env.WATCH_DIR || 'C:/path/to/local/dir',
-    ftpHost: process.env.FTP_HOST || 'ftp.example.com',
-    ftpPort: parseInt(process.env.FTP_PORT || '21', 10),
-    ftpUser: process.env.FTP_USER || 'username',
-    ftpPassword: process.env.FTP_PASSWORD || 'password',
-    ftpRemoteDir: process.env.FTP_REMOTE_DIR || '/remote/target/dir',
-    secure: process.env.FTP_SECURE === 'true',
-    ftpTimeout: parseInt(process.env.FTP_TIMEOUT || '30000', 10),
-    stabilityThreshold: parseInt(process.env.STABILITY_THRESHOLD || '2000', 10),
-    pollInterval: parseInt(process.env.POLL_INTERVAL || '100', 10),
-    maxAgeDays: parseFloat(process.env.MAX_AGE_DAYS || '1'),
-    autoDeleteLocal: process.env.AUTO_DELETE_LOCAL === 'true',
-    autoDeleteRemote: process.env.AUTO_DELETE_REMOTE === 'true',
-    autoDeleteRecursive: process.env.AUTO_DELETE_RECURSIVE === 'true',
-    cleanupIntervalMinutes: parseInt(process.env.CLEANUP_INTERVAL_MINUTES || '60', 10),
-  }];
+  console.log(`[Config] Loading YAML configuration from ${configFile}...`);
+  try {
+    const raw = yaml.load(fs.readFileSync(configFile, 'utf8'));
+    const defaults = raw.default || {};
+    const rawTasks = Array.isArray(raw.tasks) && raw.tasks.length > 0 ? raw.tasks : [];
+
+    if (rawTasks.length === 0) {
+      console.warn(`[Config Warning] No tasks defined in ${configFile}.`);
+    }
+
+    return rawTasks.map((t, index) => {
+      const merged = Object.assign({}, defaults, t);
+      return {
+        name: merged.name || `Task ${index + 1}`,
+        enableWatchUpload: merged.enableWatchUpload !== false,
+        useAtomicUpload: merged.useAtomicUpload === true,
+        persistentConnection: merged.persistentConnection === true,
+        includeHiddenFiles: merged.includeHiddenFiles === true,
+        watchDir: merged.watchDir || 'C:/path/to/local/dir',
+        ftpHost: merged.ftpHost || 'ftp.example.com',
+        ftpPort: parseInt(merged.ftpPort || '21', 10),
+        ftpUser: merged.ftpUser || 'username',
+        ftpPassword: String(merged.ftpPassword || 'password'),
+        ftpRemoteDir: merged.ftpRemoteDir || '/remote/target/dir',
+        secure: merged.ftpSecure === true,
+        ftpTimeout: parseInt(merged.ftpTimeout || '30000', 10),
+        stabilityThreshold: parseInt(merged.stabilityThreshold || '2000', 10),
+        pollInterval: parseInt(merged.pollInterval || '100', 10),
+        maxAgeDays: parseFloat(merged.maxAgeDays || '1'),
+        autoDeleteLocal: merged.autoDeleteLocal === true,
+        autoDeleteRemote: merged.autoDeleteRemote === true,
+        autoDeleteRecursive: merged.autoDeleteRecursive === true,
+        cleanupIntervalMinutes: parseInt(merged.cleanupIntervalMinutes || '60', 10),
+      };
+    });
+  } catch (err) {
+    console.error(`[Config Error] Failed to parse ${configFile}:`, err.message);
+    process.exit(1);
+  }
 }
 
 /**
