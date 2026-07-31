@@ -1,0 +1,39 @@
+# Watch & FTP Auto-Uploader Configuration
+# Global default settings (inherited by all tasks unless overridden in a task)
+default:
+  enableWatchUpload: true
+  persistentConnection: false
+  useAtomicUpload: true
+  includeHiddenFiles: false
+  ftpPort: 21
+  ftpSecure: false
+  ftpTimeout: 30000
+  stabilityThreshold: 2000
+  pollInterval: 100
+  maxAgeDays: 1
+  autoDeleteLocal: false
+  autoDeleteRemote: false
+  autoDeleteRecursive: false
+  cleanupIntervalMinutes: 60
+
+# Multi dir-ftp pairs / tasks
+tasks:
+  - name: "Task 1 - Web Assets"
+    watchDir: "C:/path/to/local/dir1"
+    ftpHost: "ftp.example.com"
+    ftpPort: 21
+    ftpUser: "username"
+    # NOTE: Wrap password in quotes if it contains special characters like # ' "
+    ftpPassword: "password"
+    ftpRemoteDir: "/remote/target/dir1"
+
+  - name: "Task 2 - Data Sync"
+    watchDir: "C:/path/to/local/dir2"
+    ftpHost: "ftp.rxdwdsj.com"
+    ftpPort: 2121
+    ftpUser: "ftpuser"
+    ftpPassword: "1qaz2wsx"
+    ftpRemoteDir: "/test_upload"
+    useAtomicUpload: true
+    autoDeleteRemote: true
+    maxAgeDays: 7
