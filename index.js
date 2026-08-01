@@ -69,20 +69,28 @@ class FtpConnectionManager {
     this.client = null;
   }
 
+  /**
+   * Helper to create and authenticate a new ftp.Client instance
+   */
+  async _createClient() {
+    const client = new ftp.Client();
+    client.ftp.verbose = false;
+    client.ftp.timeout = this.config.ftpTimeout;
+    await client.access({
+      host: this.config.ftpHost,
+      port: this.config.ftpPort,
+      user: this.config.ftpUser,
+      password: this.config.ftpPassword,
+      secure: this.config.secure,
+    });
+    return client;
+  }
+
   async getClient() {
     // Mode 1: Per-File Stateless Connection (persistentConnection = false)
     if (!this.config.persistentConnection) {
-      const newClient = new ftp.Client();
-      newClient.ftp.verbose = false;
-      newClient.ftp.timeout = this.config.ftpTimeout;
-      await newClient.access({
-        host: this.config.ftpHost,
-        port: this.config.ftpPort,
-        user: this.config.ftpUser,
-        password: this.config.ftpPassword,
-        secure: this.config.secure,
-      });
-      return { client: newClient, isShared: false };
+      const client = await this._createClient();
+      return { client, isShared: false };
     }
 
     // Mode 2: Reusable Persistent Connection (persistentConnection = true)
@@ -99,16 +107,7 @@ class FtpConnectionManager {
 
     // Connect fresh persistent client
     console.log(`[${new Date().toLocaleTimeString()}] [${this.config.name}] Authenticating persistent FTP connection...`);
-    this.client = new ftp.Client();
-    this.client.ftp.verbose = false;
-    this.client.ftp.timeout = this.config.ftpTimeout;
-    await this.client.access({
-      host: this.config.ftpHost,
-      port: this.config.ftpPort,
-      user: this.config.ftpUser,
-      password: this.config.ftpPassword,
-      secure: this.config.secure,
-    });
+    this.client = await this._createClient();
     return { client: this.client, isShared: true };
   }
 }
