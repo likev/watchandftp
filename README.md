@@ -97,6 +97,19 @@ tasks:
 
 ---
 
+## Connection Modes (`persistentConnection`)
+
+* **`persistentConnection: false` (Default - Parallel Mode)**:
+  * Opens a fresh FTP connection for each upload and closes it immediately upon completion.
+  * Completely immune to server session idle timeouts.
+  * Allows multiple files added simultaneously to upload **in parallel** on independent sockets.
+* **`persistentConnection: true` (Persistent Mode)**:
+  * Reuses an active open connection across multiple file uploads (0ms login overhead for subsequent files).
+  * Automatically checks session health (`NOOP`). If the server closed the session due to idle timeout, it re-authenticates automatically before uploading.
+  * **Sequential Queueing**: Note that because a single FTP control socket can only process one file transfer at a time, we can **only upload one file at a time when `persistentConnection = true`**. Multiple concurrent files will be automatically queued and uploaded sequentially.
+
+---
+
 ## Upload Failure Retries (`retryIfFail` & `retryTimes`)
 
 When `retryIfFail: true` is set, if an upload fails due to network disconnects or temporary FTP server errors, the script retries using **Exponential Backoff**:
