@@ -34,6 +34,7 @@ function loadConfiguration() {
         enableWatchUpload: merged.enableWatchUpload !== false,
         useAtomicUpload: merged.useAtomicUpload === true,
         persistentConnection: merged.persistentConnection === true,
+        connectionPools: parseInt(merged.connectionPools || '5', 10),
         includeHiddenFiles: merged.includeHiddenFiles === true,
         retryIfFail: merged.retryIfFail === true,
         retryTimes: parseInt(merged.retryTimes || '3', 10),
@@ -61,12 +62,13 @@ function loadConfiguration() {
 }
 
 /**
- * Connection Manager for handling reusable persistent connections with auto-reconnect
+ * Connection Manager for handling reusable persistent connection pools with auto-reconnect
  */
 class FtpConnectionManager {
   constructor(config) {
     this.config = config;
-    this.client = null;
+    this.pool = [];         // Array of { client, inUse: boolean }
+    this.waitingQueue = []; // Array of promise resolvers waiting for a pool slot
   }
 
   /**
@@ -75,7 +77,7 @@ class FtpConnectionManager {
   async _createClient() {
     const client = new ftp.Client();
     client.ftp.verbose = false;
-    client.ftp.timeout = this.config.ftpTimeout;
+    client.ftp.timeout = this.config.ftpTimeout || 30000;
     await client.access({
       host: this.config.ftpHost,
       port: this.config.ftpPort,
@@ -90,25 +92,63 @@ class FtpConnectionManager {
     // Mode 1: Per-File Stateless Connection (persistentConnection = false)
     if (!this.config.persistentConnection) {
       const client = await this._createClient();
-      return { client, isShared: false };
+      return { client, isShared: false, slot: null };
     }
 
-    // Mode 2: Reusable Persistent Connection (persistentConnection = true)
-    if (this.client && !this.client.closed) {
-      try {
-        await this.client.send('NOOP', true);
-        return { client: this.client, isShared: true };
-      } catch (err) {
-        console.log(`[${new Date().toLocaleTimeString()}] [${this.config.name}] Session expired/closed by server. Re-authenticating...`);
-        this.client.close();
-        this.client = null;
+    // Mode 2: Persistent Connection Pool (persistentConnection = true)
+    while (true) {
+      // 1. Check for an existing idle connection slot in the pool
+      let slot = this.pool.find((s) => !s.inUse);
+
+      if (slot) {
+        slot.inUse = true;
+        if (slot.client && !slot.client.closed) {
+          try {
+            await slot.client.send('NOOP', true);
+            return { client: slot.client, isShared: true, slot };
+          } catch (err) {
+            console.log(`[${new Date().toLocaleTimeString()}] [${this.config.name}] Pool connection session expired. Re-authenticating...`);
+            if (slot.client) slot.client.close();
+            slot.client = null;
+          }
+        }
+
+        // Re-authenticate idle slot
+        slot.client = await this._createClient();
+        return { client: slot.client, isShared: true, slot };
       }
-    }
 
-    // Connect fresh persistent client
-    console.log(`[${new Date().toLocaleTimeString()}] [${this.config.name}] Authenticating persistent FTP connection...`);
-    this.client = await this._createClient();
-    return { client: this.client, isShared: true };
+      // 2. Reserve slot synchronously if pool size < connectionPools to prevent async race conditions
+      const maxPoolSize = this.config.connectionPools || 5;
+      if (this.pool.length < maxPoolSize) {
+        slot = { client: null, inUse: true };
+        this.pool.push(slot);
+
+        try {
+          console.log(`[${new Date().toLocaleTimeString()}] [${this.config.name}] Authenticating persistent connection pool slot (${this.pool.length}/${maxPoolSize})...`);
+          slot.client = await this._createClient();
+          return { client: slot.client, isShared: true, slot };
+        } catch (err) {
+          const idx = this.pool.indexOf(slot);
+          if (idx !== -1) this.pool.splice(idx, 1);
+          throw err;
+        }
+      }
+
+      // 3. Pool is full and all slots are in use: wait for a slot to be released
+      await new Promise((resolve) => this.waitingQueue.push(resolve));
+    }
+  }
+
+  releaseClient(clientInfo) {
+    if (!clientInfo || !clientInfo.slot) return;
+    clientInfo.slot.inUse = false;
+
+    // Wake up next upload waiting for a pool connection slot
+    if (this.waitingQueue.length > 0) {
+      const nextResolver = this.waitingQueue.shift();
+      nextResolver();
+    }
   }
 }
 
@@ -119,8 +159,6 @@ class TaskRunner {
   constructor(config) {
     this.config = config;
     this.ftpManager = new FtpConnectionManager(config);
-    this.uploadQueue = [];           // Array queue for storing file paths (used in persistent mode)
-    this.isProcessingQueue = false;  // Flag indicating if queue worker loop is active
   }
 
   log(msg, type = 'info') {
@@ -132,42 +170,8 @@ class TaskRunner {
     }
   }
 
-  /**
-   * Main upload handler
-   * - If persistentConnection = false: Executes parallel uploads on independent sockets immediately.
-   * - If persistentConnection = true: Enqueues uploads into a sequential worker queue to share the socket safely.
-   */
   uploadToFtp(filePath) {
-    if (!this.config.persistentConnection) {
-      // Parallel mode (independent connection per file)
-      return this._executeUpload(filePath);
-    }
-
-    // Persistent mode (queued sequential execution to share single socket)
-    this.uploadQueue.push(filePath);
-    return this._processQueue();
-  }
-
-  /**
-   * Queue Worker Loop for persistent connection mode
-   */
-  async _processQueue() {
-    if (this.isProcessingQueue) {
-      return; // Worker is already processing
-    }
-
-    this.isProcessingQueue = true;
-
-    while (this.uploadQueue.length > 0) {
-      const nextFile = this.uploadQueue.shift();
-      try {
-        await this._executeUpload(nextFile);
-      } catch (err) {
-        this.log(`Queue Worker Error processing ${nextFile}: ${err.message}`, 'error');
-      }
-    }
-
-    this.isProcessingQueue = false;
+    return this._executeUpload(filePath);
   }
 
   /**
@@ -221,8 +225,12 @@ class TaskRunner {
           await new Promise((resolve) => setTimeout(resolve, waitMs));
         }
       } finally {
-        if (clientInfo && !clientInfo.isShared && clientInfo.client) {
-          clientInfo.client.close();
+        if (clientInfo) {
+          if (clientInfo.isShared) {
+            this.ftpManager.releaseClient(clientInfo);
+          } else if (clientInfo.client) {
+            clientInfo.client.close();
+          }
         }
       }
     }
@@ -293,7 +301,7 @@ class TaskRunner {
     if (this.config.autoDeleteRemote) {
       const client = new ftp.Client();
       client.ftp.verbose = false;
-      client.ftp.timeout = this.config.ftpTimeout;
+      client.ftp.timeout = this.config.ftpTimeout || 30000;
       try {
         await client.access({
           host: this.config.ftpHost,
@@ -317,7 +325,7 @@ class TaskRunner {
     console.log(`===================================================`);
     console.log(`Task Name:           ${this.config.name}`);
     console.log(`Watch & Auto-Upload: ${this.config.enableWatchUpload ? 'ENABLED' : 'DISABLED'}`);
-    console.log(`Persistent Conn:     ${this.config.persistentConnection ? 'ENABLED (Queued)' : 'DISABLED (Parallel)'}`);
+    console.log(`Persistent Conn:     ${this.config.persistentConnection ? `ENABLED (Pool size: ${this.config.connectionPools})` : 'DISABLED'}`);
     console.log(`Atomic (.uploading): ${this.config.useAtomicUpload ? 'ENABLED' : 'DISABLED'}`);
     console.log(`Include Hidden Files:${this.config.includeHiddenFiles ? 'ENABLED' : 'DISABLED'}`);
     console.log(`Retry On Failure:    ${this.config.retryIfFail ? `ENABLED (${this.config.retryTimes} retries, 1m/2m/4m...)` : 'DISABLED'}`);

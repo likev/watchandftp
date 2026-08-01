@@ -3,6 +3,7 @@
 default:
   enableWatchUpload: true
   persistentConnection: false
+  connectionPools: 5
   useAtomicUpload: true
   includeHiddenFiles: false
   retryIfFail: false
@@ -29,13 +30,15 @@ tasks:
     ftpPassword: "password"
     ftpRemoteDir: "/remote/target/dir1"
 
-  - name: "Task 2 - Data Sync with Retries"
+  - name: "Task 2 - Data Sync with Persistent Connection Pool"
     watchDir: "C:/path/to/local/dir2"
     ftpHost: "ftp.rxdwdsj.com"
     ftpPort: 2121
     ftpUser: "ftpuser"
     ftpPassword: "1qaz2wsx"
     ftpRemoteDir: "/test_upload"
+    persistentConnection: true
+    connectionPools: 5
     useAtomicUpload: true
     retryIfFail: true
     retryTimes: 3

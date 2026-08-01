@@ -3,12 +3,12 @@
 Monitors local folders for newly created or modified files, waits until file writing is 100% finished, automatically uploads them to FTP servers, and optionally cleans up old files on local disk and/or FTP servers.
 
 ## Features
+- **Persistent Connection Pool**: Configurable connection pool (`connectionPools`, default: 5) to allow parallel file transfers while reusing persistent authenticated FTP sessions.
 - **Exponential Backoff Retries**: Option to retry failed uploads automatically with doubling backoff delays (1 min, 2 min, 4 min...).
 - **Multi-Task & Multi-FTP Support**: Define multiple `watchDir` $\rightarrow$ `FTP` pairs in `config.yaml`.
 - **Global Defaults & Task Inheritance**: Define `default:` options once in `config.yaml` and override per-task as needed.
 - **Exclude Hidden Files**: Default filtering out of dotfiles (`.DS_Store`, `.git`, etc.) with configurable toggle (`includeHiddenFiles`).
 - **Recursive Cleanup Option**: Option to clean files in subdirectories recursively (`autoDeleteRecursive`).
-- **Persistent Connection & Auto-Reconnect**: Optional reusable connection mode with automatic session recovery if server idle timeout occurs.
 - **Atomic Temporary Uploads**: Option to upload files as `.uploading` and atomically rename them upon completion to prevent remote processes from reading partial uploads.
 - **Cross-Platform**: Runs natively on **Windows 10**, **Linux**, **WSL**, and **macOS**.
 
@@ -29,6 +29,7 @@ cp config.example.yaml config.yaml
 default:
   enableWatchUpload: true
   persistentConnection: false
+  connectionPools: 5
   useAtomicUpload: true
   includeHiddenFiles: false
   retryIfFail: false
@@ -54,13 +55,15 @@ tasks:
     ftpPassword: "passwordA"
     ftpRemoteDir: "/public_html/images"
 
-  - name: "Task 2 - Data Sync with Retries"
+  - name: "Task 2 - Data Sync with Connection Pool"
     watchDir: "C:/path/to/backups"
     ftpHost: "ftp.siteb.com"
     ftpPort: 2121
     ftpUser: "userB"
     ftpPassword: "passwordB"
     ftpRemoteDir: "/backups/daily"
+    persistentConnection: true
+    connectionPools: 5
     retryIfFail: true
     retryTimes: 3
     useAtomicUpload: true
@@ -74,7 +77,8 @@ tasks:
 | :--- | :--- | :--- |
 | `name` | `Task N` | Display name for the task log output |
 | `enableWatchUpload` | `true` | Set to `false` to disable file watching and uploading for this task |
-| `persistentConnection` | `false` | Set to `true` to reuse FTP connection session across uploads with auto-reconnect |
+| `persistentConnection` | `false` | Set to `true` to reuse FTP connection sessions across uploads with auto-reconnect |
+| `connectionPools` | `5` | Size of persistent connection pool (only valid when `persistentConnection=true`) |
 | `useAtomicUpload` | `false` | Set to `true` to upload files as `filename.uploading` and atomically rename when done |
 | `includeHiddenFiles` | `false` | Set to `true` to include hidden dotfiles (`.DS_Store`, `.git`, etc.) |
 | `retryIfFail` | `false` | Set to `true` to automatically retry failed file uploads |
@@ -97,16 +101,18 @@ tasks:
 
 ---
 
-## Connection Modes (`persistentConnection`)
+## Connection Modes & Connection Pooling (`connectionPools`)
 
-* **`persistentConnection: false` (Default - Parallel Mode)**:
+* **`persistentConnection: false` (Stateless Mode)**:
   * Opens a fresh FTP connection for each upload and closes it immediately upon completion.
   * Completely immune to server session idle timeouts.
-  * Allows multiple files added simultaneously to upload **in parallel** on independent sockets.
-* **`persistentConnection: true` (Persistent Mode)**:
-  * Reuses an active open connection across multiple file uploads (0ms login overhead for subsequent files).
-  * Automatically checks session health (`NOOP`). If the server closed the session due to idle timeout, it re-authenticates automatically before uploading.
-  * **Sequential Queueing**: Note that because a single FTP control socket can only process one file transfer at a time, we can **only upload one file at a time when `persistentConnection = true`**. Multiple concurrent files will be automatically queued and uploaded sequentially.
+  * Uploads run in parallel on independent sockets.
+
+* **`persistentConnection: true` (Persistent Connection Pool Mode)**:
+  * Maintains a pool of **up to `connectionPools` persistent connections** (default: `5`).
+  * Up to `connectionPools` files can upload **in parallel simultaneously** using reusable authenticated connections (0ms login overhead for subsequent uploads).
+  * Automatically tests session health (`NOOP`) and re-authenticates expired sessions.
+  * If more than `connectionPools` files arrive concurrently, excess files wait in a queue for the next available pool slot.
 
 ---
 
