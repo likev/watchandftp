@@ -120,6 +120,7 @@ class TaskRunner {
   constructor(config) {
     this.config = config;
     this.ftpManager = new FtpConnectionManager(config);
+    this.uploadQueue = Promise.resolve(); // Queue promise chain to serialize concurrent uploads
   }
 
   log(msg, type = 'info') {
@@ -131,7 +132,17 @@ class TaskRunner {
     }
   }
 
-  async uploadToFtp(filePath) {
+  uploadToFtp(filePath) {
+    // Queue uploads sequentially to prevent concurrent socket collisions
+    this.uploadQueue = this.uploadQueue
+      .then(() => this._executeUpload(filePath))
+      .catch((err) => {
+        // Prevent queue breakage on unhandled error
+      });
+    return this.uploadQueue;
+  }
+
+  async _executeUpload(filePath) {
     const filename = path.basename(filePath);
 
     if (!this.config.includeHiddenFiles && filename.startsWith('.')) {
@@ -321,11 +332,15 @@ class TaskRunner {
 // Main Execution
 // -------------------------------------------------------------
 
-console.log('--- Watch & FTP Auto-Uploader / Cleanup Service ---\n');
-const tasksConfig = loadConfiguration();
-console.log(`Loaded ${tasksConfig.length} task(s).\n`);
+if (require.main === module) {
+  console.log('--- Watch & FTP Auto-Uploader / Cleanup Service ---\n');
+  const tasksConfig = loadConfiguration();
+  console.log(`Loaded ${tasksConfig.length} task(s).\n`);
 
-tasksConfig.forEach((taskConfig) => {
-  const runner = new TaskRunner(taskConfig);
-  runner.start();
-});
+  tasksConfig.forEach((taskConfig) => {
+    const runner = new TaskRunner(taskConfig);
+    runner.start();
+  });
+}
+
+module.exports = { TaskRunner, FtpConnectionManager, loadConfiguration };
