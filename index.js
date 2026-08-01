@@ -114,14 +114,14 @@ class FtpConnectionManager {
 }
 
 /**
- * Task Runner instance for managing a single dir-ftp pair using an Array Queue Worker pattern
+ * Task Runner instance for managing a single dir-ftp pair
  */
 class TaskRunner {
   constructor(config) {
     this.config = config;
     this.ftpManager = new FtpConnectionManager(config);
-    this.uploadQueue = [];           // Array queue for storing file paths to upload
-    this.isProcessingQueue = false;  // Flag indicating if queue worker loop is currently active
+    this.uploadQueue = [];           // Array queue for storing file paths (used in persistent mode)
+    this.isProcessingQueue = false;  // Flag indicating if queue worker loop is active
   }
 
   log(msg, type = 'info') {
@@ -134,19 +134,27 @@ class TaskRunner {
   }
 
   /**
-   * Enqueues a file path for upload and starts the queue worker if idle
+   * Main upload handler
+   * - If persistentConnection = false: Executes parallel uploads on independent sockets immediately.
+   * - If persistentConnection = true: Enqueues uploads into a sequential worker queue to share the socket safely.
    */
   uploadToFtp(filePath) {
+    if (!this.config.persistentConnection) {
+      // Parallel mode (independent connection per file)
+      return this._executeUpload(filePath);
+    }
+
+    // Persistent mode (queued sequential execution to share single socket)
     this.uploadQueue.push(filePath);
     return this._processQueue();
   }
 
   /**
-   * Queue Worker Loop: processes queued files sequentially
+   * Queue Worker Loop for persistent connection mode
    */
   async _processQueue() {
     if (this.isProcessingQueue) {
-      return; // Worker is already processing the queue
+      return; // Worker is already processing
     }
 
     this.isProcessingQueue = true;
@@ -310,7 +318,7 @@ class TaskRunner {
     console.log(`===================================================`);
     console.log(`Task Name:           ${this.config.name}`);
     console.log(`Watch & Auto-Upload: ${this.config.enableWatchUpload ? 'ENABLED' : 'DISABLED'}`);
-    console.log(`Persistent Conn:     ${this.config.persistentConnection ? 'ENABLED' : 'DISABLED'}`);
+    console.log(`Persistent Conn:     ${this.config.persistentConnection ? 'ENABLED (Queued)' : 'DISABLED (Parallel)'}`);
     console.log(`Atomic (.uploading): ${this.config.useAtomicUpload ? 'ENABLED' : 'DISABLED'}`);
     console.log(`Include Hidden Files:${this.config.includeHiddenFiles ? 'ENABLED' : 'DISABLED'}`);
     console.log(`Retry On Failure:    ${this.config.retryIfFail ? `ENABLED (${this.config.retryTimes} retries, 1m/2m/4m...)` : 'DISABLED'}`);
