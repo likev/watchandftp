@@ -114,13 +114,14 @@ class FtpConnectionManager {
 }
 
 /**
- * Task Runner instance for managing a single dir-ftp pair
+ * Task Runner instance for managing a single dir-ftp pair using an Array Queue Worker pattern
  */
 class TaskRunner {
   constructor(config) {
     this.config = config;
     this.ftpManager = new FtpConnectionManager(config);
-    this.uploadQueue = Promise.resolve(); // Queue promise chain to serialize concurrent uploads
+    this.uploadQueue = [];           // Array queue for storing file paths to upload
+    this.isProcessingQueue = false;  // Flag indicating if queue worker loop is currently active
   }
 
   log(msg, type = 'info') {
@@ -132,16 +133,39 @@ class TaskRunner {
     }
   }
 
+  /**
+   * Enqueues a file path for upload and starts the queue worker if idle
+   */
   uploadToFtp(filePath) {
-    // Queue uploads sequentially to prevent concurrent socket collisions
-    this.uploadQueue = this.uploadQueue
-      .then(() => this._executeUpload(filePath))
-      .catch((err) => {
-        // Prevent queue breakage on unhandled error
-      });
-    return this.uploadQueue;
+    this.uploadQueue.push(filePath);
+    return this._processQueue();
   }
 
+  /**
+   * Queue Worker Loop: processes queued files sequentially
+   */
+  async _processQueue() {
+    if (this.isProcessingQueue) {
+      return; // Worker is already processing the queue
+    }
+
+    this.isProcessingQueue = true;
+
+    while (this.uploadQueue.length > 0) {
+      const nextFile = this.uploadQueue.shift();
+      try {
+        await this._executeUpload(nextFile);
+      } catch (err) {
+        this.log(`Queue Worker Error processing ${nextFile}: ${err.message}`, 'error');
+      }
+    }
+
+    this.isProcessingQueue = false;
+  }
+
+  /**
+   * Executes single file upload with optional atomic rename & retries
+   */
   async _executeUpload(filePath) {
     const filename = path.basename(filePath);
 
