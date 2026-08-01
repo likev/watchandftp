@@ -72,26 +72,33 @@ class FtpConnectionManager {
   }
 
   /**
-   * Helper to create and authenticate a new ftp.Client instance
+   * Helper to create and authenticate a new ftp.Client instance.
+   * Catches connection errors internally and returns null on failure.
    */
   async _createClient() {
-    const client = new ftp.Client();
-    client.ftp.verbose = false;
-    client.ftp.timeout = this.config.ftpTimeout || 30000;
-    await client.access({
-      host: this.config.ftpHost,
-      port: this.config.ftpPort,
-      user: this.config.ftpUser,
-      password: this.config.ftpPassword,
-      secure: this.config.secure,
-    });
-    return client;
+    try {
+      const client = new ftp.Client();
+      client.ftp.verbose = false;
+      client.ftp.timeout = this.config.ftpTimeout || 30000;
+      await client.access({
+        host: this.config.ftpHost,
+        port: this.config.ftpPort,
+        user: this.config.ftpUser,
+        password: this.config.ftpPassword,
+        secure: this.config.secure,
+      });
+      return client;
+    } catch (err) {
+      console.error(`[${new Date().toLocaleTimeString()}] [${this.config.name}] Connection Error: ${err.message}`);
+      return null;
+    }
   }
 
   async getClient() {
     // Mode 1: Per-File Stateless Connection (persistentConnection = false)
     if (!this.config.persistentConnection) {
       const client = await this._createClient();
+      if (!client) throw new Error(`FTP connection failed to ${this.config.ftpHost}:${this.config.ftpPort}`);
       return { client, isShared: false, slot: null };
     }
 
@@ -115,24 +122,30 @@ class FtpConnectionManager {
 
         // Re-authenticate idle slot
         slot.client = await this._createClient();
+        if (!slot.client) {
+          slot.inUse = false;
+          throw new Error(`FTP re-authentication failed to ${this.config.ftpHost}:${this.config.ftpPort}`);
+        }
         return { client: slot.client, isShared: true, slot };
       }
 
-      // 2. Reserve slot synchronously if pool size < connectionPools to prevent async race conditions
+      // 2. Reserve slot synchronously if pool size < connectionPools
       const maxPoolSize = this.config.connectionPools || 5;
       if (this.pool.length < maxPoolSize) {
         slot = { client: null, inUse: true };
         this.pool.push(slot);
 
-        try {
-          console.log(`[${new Date().toLocaleTimeString()}] [${this.config.name}] Authenticating persistent connection pool slot (${this.pool.length}/${maxPoolSize})...`);
-          slot.client = await this._createClient();
-          return { client: slot.client, isShared: true, slot };
-        } catch (err) {
+        console.log(`[${new Date().toLocaleTimeString()}] [${this.config.name}] Authenticating persistent connection pool slot (${this.pool.length}/${maxPoolSize})...`);
+        const client = await this._createClient();
+
+        if (!client) {
           const idx = this.pool.indexOf(slot);
           if (idx !== -1) this.pool.splice(idx, 1);
-          throw err;
+          throw new Error(`FTP connection failed to ${this.config.ftpHost}:${this.config.ftpPort}`);
         }
+
+        slot.client = client;
+        return { client: slot.client, isShared: true, slot };
       }
 
       // 3. Pool is full and all slots are in use: wait for a slot to be released
