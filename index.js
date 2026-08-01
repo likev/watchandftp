@@ -94,6 +94,68 @@ class FtpConnectionManager {
     }
   }
 
+  /**
+   * Finds an existing idle connection slot in the pool and verifies health
+   */
+  async _findInPool() {
+    const slot = this.pool.find((s) => !s.inUse);
+    if (!slot) return null;
+
+    slot.inUse = true;
+
+    if (slot.client && !slot.client.closed) {
+      try {
+        await slot.client.send('NOOP', true);
+        return { client: slot.client, isShared: true, slot };
+      } catch (err) {
+        console.log(`[${new Date().toLocaleTimeString()}] [${this.config.name}] Pool connection session expired. Re-authenticating...`);
+        if (slot.client) slot.client.close();
+        slot.client = null;
+      }
+    }
+
+    slot.client = await this._createClient();
+    if (!slot.client) {
+      slot.inUse = false;
+      throw new Error(`FTP re-authentication failed to ${this.config.ftpHost}:${this.config.ftpPort}`);
+    }
+
+    return { client: slot.client, isShared: true, slot };
+  }
+
+  /**
+   * Reserves a new slot in the pool if capacity permits and authenticates connection
+   */
+  async _addToPool() {
+    const maxPoolSize = this.config.connectionPools || 5;
+    if (this.pool.length >= maxPoolSize) {
+      return null;
+    }
+
+    // Reserve slot synchronously to prevent async race conditions
+    const slot = { client: null, inUse: true };
+    this.pool.push(slot);
+
+    console.log(`[${new Date().toLocaleTimeString()}] [${this.config.name}] Authenticating persistent connection pool slot (${this.pool.length}/${maxPoolSize})...`);
+    const client = await this._createClient();
+
+    if (!client) {
+      const idx = this.pool.indexOf(slot);
+      if (idx !== -1) this.pool.splice(idx, 1);
+      throw new Error(`FTP connection failed to ${this.config.ftpHost}:${this.config.ftpPort}`);
+    }
+
+    slot.client = client;
+    return { client: slot.client, isShared: true, slot };
+  }
+
+  /**
+   * Waits for an in-use pool connection slot to be released
+   */
+  _waitForSlot() {
+    return new Promise((resolve) => this.waitingQueue.push(resolve));
+  }
+
   async getClient() {
     // Mode 1: Per-File Stateless Connection (persistentConnection = false)
     if (!this.config.persistentConnection) {
@@ -104,52 +166,13 @@ class FtpConnectionManager {
 
     // Mode 2: Persistent Connection Pool (persistentConnection = true)
     while (true) {
-      // 1. Check for an existing idle connection slot in the pool
-      let slot = this.pool.find((s) => !s.inUse);
+      const pooledClient = await this._findInPool();
+      if (pooledClient) return pooledClient;
 
-      if (slot) {
-        slot.inUse = true;
-        if (slot.client && !slot.client.closed) {
-          try {
-            await slot.client.send('NOOP', true);
-            return { client: slot.client, isShared: true, slot };
-          } catch (err) {
-            console.log(`[${new Date().toLocaleTimeString()}] [${this.config.name}] Pool connection session expired. Re-authenticating...`);
-            if (slot.client) slot.client.close();
-            slot.client = null;
-          }
-        }
+      const newPoolClient = await this._addToPool();
+      if (newPoolClient) return newPoolClient;
 
-        // Re-authenticate idle slot
-        slot.client = await this._createClient();
-        if (!slot.client) {
-          slot.inUse = false;
-          throw new Error(`FTP re-authentication failed to ${this.config.ftpHost}:${this.config.ftpPort}`);
-        }
-        return { client: slot.client, isShared: true, slot };
-      }
-
-      // 2. Reserve slot synchronously if pool size < connectionPools
-      const maxPoolSize = this.config.connectionPools || 5;
-      if (this.pool.length < maxPoolSize) {
-        slot = { client: null, inUse: true };
-        this.pool.push(slot);
-
-        console.log(`[${new Date().toLocaleTimeString()}] [${this.config.name}] Authenticating persistent connection pool slot (${this.pool.length}/${maxPoolSize})...`);
-        const client = await this._createClient();
-
-        if (!client) {
-          const idx = this.pool.indexOf(slot);
-          if (idx !== -1) this.pool.splice(idx, 1);
-          throw new Error(`FTP connection failed to ${this.config.ftpHost}:${this.config.ftpPort}`);
-        }
-
-        slot.client = client;
-        return { client: slot.client, isShared: true, slot };
-      }
-
-      // 3. Pool is full and all slots are in use: wait for a slot to be released
-      await new Promise((resolve) => this.waitingQueue.push(resolve));
+      await this._waitForSlot();
     }
   }
 
